@@ -29,6 +29,9 @@ import {
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import mammoth from 'mammoth';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -170,30 +173,113 @@ export default function App() {
     setIsMerging(true);
     setStatus({ type: null, message: '' });
 
-    const formData = new FormData();
-    files.forEach(item => {
-      formData.append('files', item.file);
-    });
-    formData.append('order', JSON.stringify(files.map(f => f.name)));
-    formData.append('outputName', outputName);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes timeout
-
     try {
-      const response = await fetch('/api/merge', {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Merge failed');
+      const mergedPdf = await PDFDocument.create();
+      mergedPdf.registerFontkit(fontkit);
+      
+      // Fetch CJK font
+      const FONT_URL = "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/SubsetOTF/TC/NotoSansTC-Regular.otf";
+      let fontBytes: ArrayBuffer | null = null;
+      try {
+        const fontRes = await fetch(FONT_URL);
+        if (fontRes.ok) fontBytes = await fontRes.arrayBuffer();
+      } catch (e) {
+        console.warn("Could not load CJK font, falling back to standard font", e);
       }
 
-      const blob = await response.blob();
+      let addedPagesCount = 0;
+
+      for (const item of files) {
+        const file = item.file;
+        let pdfBytes: Uint8Array;
+
+        if (file.type === "application/pdf" || file.name.toLowerCase().endsWith('.pdf')) {
+          pdfBytes = new Uint8Array(await file.arrayBuffer());
+        } else {
+          let text = "";
+          if (file.type === "text/plain" || file.name.toLowerCase().endsWith('.txt')) {
+            text = await file.text();
+          } else if (
+            file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            file.name.toLowerCase().endsWith(".docx") ||
+            file.name.toLowerCase().endsWith(".doc")
+          ) {
+            const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+            text = result.value;
+          } else {
+            continue;
+          }
+
+          // Sanitize text
+          text = text
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/[^\x20-\x7E\u00A0-\u00FF\u0100-\u017F\u0180-\u024F\u0370-\u03FF\u0400-\u04FF\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\uFF00-\uFFEF\u4E00-\u9FAF\n\t]/g, "");
+
+          const textPdf = await PDFDocument.create();
+          textPdf.registerFontkit(fontkit);
+          
+          let font;
+          if (fontBytes) {
+            font = await textPdf.embedFont(fontBytes);
+          } else {
+            font = await textPdf.embedFont(StandardFonts.Helvetica);
+          }
+
+          const fontSize = 12;
+          const margin = 50;
+          let page = textPdf.addPage();
+          const { width, height } = page.getSize();
+          const maxWidth = width - margin * 2;
+
+          const splitTextIntoLines = (text: string, font: any, size: number, maxWidth: number) => {
+            const lines: string[] = [];
+            let currentLine = "";
+            for (const char of text) {
+              if (char === '\n') {
+                lines.push(currentLine);
+                currentLine = "";
+                continue;
+              }
+              const testLine = currentLine + char;
+              const testWidth = font.widthOfTextAtSize(testLine, size);
+              if (testWidth > maxWidth && currentLine !== "") {
+                lines.push(currentLine);
+                currentLine = char;
+              } else {
+                currentLine = testLine;
+              }
+            }
+            if (currentLine) lines.push(currentLine);
+            return lines;
+          };
+
+          const lines = splitTextIntoLines(text, font, fontSize, maxWidth);
+          let y = height - margin;
+
+          for (const line of lines) {
+            if (y < margin) {
+              page = textPdf.addPage();
+              y = height - margin;
+            }
+            page.drawText(line, { x: margin, y, size: fontSize, font });
+            y -= fontSize * 1.4;
+          }
+          pdfBytes = await textPdf.save();
+        }
+
+        const donorPdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+        const copiedPages = await mergedPdf.copyPages(donorPdf, donorPdf.getPageIndices());
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+        addedPagesCount += copiedPages.length;
+      }
+
+      if (addedPagesCount === 0) {
+        throw new Error("No valid pages were added to the PDF.");
+      }
+
+      const mergedPdfBytes = await mergedPdf.save();
+      const blob = new Blob([mergedPdfBytes], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -207,11 +293,7 @@ export default function App() {
       setStatus({ type: 'success', message: 'PDF merged and downloaded successfully!' });
     } catch (error: any) {
       console.error(error);
-      if (error.name === 'AbortError') {
-        setStatus({ type: 'error', message: 'The request timed out. Large files may take longer to process.' });
-      } else {
-        setStatus({ type: 'error', message: error.message || 'An error occurred during merging. Please try again.' });
-      }
+      setStatus({ type: 'error', message: error.message || 'An error occurred during merging. Please try again.' });
     } finally {
       setIsMerging(false);
     }
