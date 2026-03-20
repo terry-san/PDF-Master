@@ -223,9 +223,9 @@ export default function App() {
         {/* Header */}
           <header className="mb-12 text-center">
           <h1 className="text-4xl font-bold tracking-tight mb-3 bg-gradient-to-r from-zinc-900 to-zinc-600 bg-clip-text text-transparent">
-            PDF Master
+            PDF 整合工具
           </h1>
-          <p className="text-zinc-500">Merge PDF, Word (DOC/DOCX), and Text files with our Enhanced Engine.</p>
+          <p className="text-zinc-500">Merge PDF, Word (最好先利用WORD本身功能轉成PDF檔), and Text files</p>
         </header>
 
         <div className="grid gap-8">
@@ -354,7 +354,7 @@ export default function App() {
         {/* Footer */}
         <footer className="mt-20 text-center border-t border-zinc-200 pt-8">
           <p className="text-xs text-zinc-400 uppercase tracking-widest">
-            Built with React & PDF-Lib
+            A custom-built program for Yanjun and Rita @ 2026.
           </p>
         </footer>
       </div>
