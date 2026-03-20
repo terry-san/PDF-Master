@@ -1,5 +1,5 @@
 {
-  "name": "PDF Master: Merge & Convert",
+  "name": "PDF 整合工具",
   "description": "A powerful tool to upload PDF, TXT, and DOCX files, reorder them, and merge them into a single PDF document.",
   "requestFramePermissions": []
 }
